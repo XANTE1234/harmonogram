@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Harmonogram Instruktorów</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 700px;
+      margin: auto;
+      padding: 20px;
+      background: #f4f4f4;
+    }
+    h2 {
+      color: #004d40;
+    }
+    textarea, input[type=text], input[type=date], input[type=number] {
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 10px;
+      padding: 8px;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #00796b;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #004d40;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 20px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #999;
+      padding: 6px;
+      text-align: center;
+    }
+    th {
+      background-color: #e0f2f1;
+    }
+    tr:nth-child(even) {
+      background-color: #fafafa;
+    }
+    tr:hover td {
+      background-color: #e6f7ff;
+    }
+    .saturday {
+      background-color: #fff9c4;
+    }
+  </style>
+</head>
+<body>
+
+<h2>📅 Harmonogram Instruktorów</h2>
+
+<label>🛠️ Maszyny i godziny (format: nazwa; godziny):</label>
+<textarea id="devices" rows="4" placeholder="np. KOPARKA; 123&#10;ŁADOWARKA; 123"></textarea>
+
+<label>👤 Instruktor:</label>
+<input type="text" id="instructor" placeholder="np. Jan" />
+
+<label>📆 Zakres dat:</label>
+<input type="date" id="startDate" /> do <input type="date" id="endDate" />
+
+<label>⏳ Minimalna liczba godzin dziennie:</label>
+<input type="number" id="minHours" min="0" max="10" value="8" />
+
+<label>🕒 Maksymalna liczba godzin dziennie (max 10):</label>
+<input type="number" id="maxHours" min="1" max="10" value="8" />
+
+<label>📴 Daty do pominięcia (RRRR-MM-DD, przecinki):</label>
+<input type="text" id="skipDays" placeholder="np. 2025-07-15,2025-07-20" />
+
+<button id="generateBtn">🔄 Generuj harmonogram</button>
+
+<div id="output"></div>
+
+<script>
+(() => {
+  const devicesEl = document.getElementById('devices');
+  const instructorEl = document.getElementById('instructor');
+  const output = document.getElementById('output');
+
+  function parseDevices(text) {
+    return text.split('\n').map(line => {
+      const parts = line.split(';');
+      if(parts.length !== 2) return null;
+      const name = parts[0].trim();
+      const hours = parseInt(parts[1].trim());
+      if(!name || isNaN(hours) || hours < 0) return null;
+      return {name, hours, remaining: hours};
+    }).filter(d => d);
+  }
+
+  document.getElementById('generateBtn').addEventListener('click', () => {
+    const devices = parseDevices(devicesEl.value);
+    const instructor = instructorEl.value.trim();
+    const startDate = new Date(document.getElementById('startDate').value);
+    const endDate = new Date(document.getElementById('endDate').value);
+    const minHours = parseInt(document.getElementById('minHours').value) || 0;
+    const maxHours = parseInt(document.getElementById('maxHours').value) || 8;
+    const skipDates = (document.getElementById('skipDays').value || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    if (!instructor) {
+      alert('Wpisz nazwę instruktora.');
+      return;
+    }
+    if (devices.length === 0) {
+      alert('Wprowadź poprawne maszyny i godziny.');
+      return;
+    }
+    if (!startDate || !endDate || isNaN(startDate) || isNaN(endDate)) {
+      alert('Wprowadź poprawny zakres dat.');
+      return;
+    }
+    if (endDate < startDate) {
+      alert('Data końcowa musi być późniejsza lub równa dacie początkowej.');
+      return;
+    }
+    if (minHours > maxHours) {
+      alert('Minimalne godziny nie mogą być większe niż maksymalne.');
+      return;
+    }
+
+    // Pobierz listę dni roboczych (bez niedziel i pominiętych)
+    const days = [];
+    for(let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const iso = d.toISOString().slice(0,10);
+      if (d.getDay() !== 0 && !skipDates.includes(iso)) {
+        days.push(new Date(d));
+      }
+    }
+
+    if(days.length === 0) {
+      alert('Brak dni roboczych w podanym zakresie dat.');
+      return;
+    }
+
+    // Przygotuj strukturę harmonogramu: data -> maszyna -> godziny
+    const schedule = {};
+    days.forEach(d => {
+      const dateStr = d.toISOString().slice(0,10);
+      schedule[dateStr] = {};
+      devices.forEach(dev => {
+        schedule[dateStr][dev.name] = 0;
+      });
+    });
+
+    // Rozpocznij rozdzielanie godzin maszyn na dni od początku listy dni
+    let currentDayIndex = 0;
+
+    while(true) {
+      // Sprawdź czy wszystkie maszyny mają 0 remaining
+      const totalRemaining = devices.reduce((sum, d) => sum + d.remaining, 0);
+      if(totalRemaining === 0) break; // wszystko rozdzielone
+
+      if(currentDayIndex >= days.length) {
+        // Koniec dni, ale godziny maszyn jeszcze są => niemożliwe do rozdzielenia
+        alert('Nie udało się rozdzielić wszystkich godzin maszyn w podanym zakresie dat.');
+        break;
+      }
+
+      const day = days[currentDayIndex];
+      const dateStr = day.toISOString().slice(0,10);
+
+      // Maksymalna liczba godzin do rozdzielenia tego dnia, od 0 do maxHours
+      let hoursToAssign = maxHours;
+
+      // Przydziel godziny minimalne, jeśli to możliwe i potrzeba
+      // Jednak minimalne godziny to taki wymóg, więc sprawdzimy czy da się je zapełnić
+
+      // Rozdziel godziny na maszyny w kolejności - dopóki są remaining i nie przekroczymy maxHours dnia
+      for(let dev of devices) {
+        if(dev.remaining === 0) continue;
+        // Ile godzin przydzielić max na tę maszynę dzisiaj?
+        // Możemy przydzielać nawet 1h na raz, aż do maxHours dziennie
+        const assignable = Math.min(dev.remaining, hoursToAssign);
+        if(assignable > 0) {
+          schedule[dateStr][dev.name] += assignable;
+          dev.remaining -= assignable;
+          hoursToAssign -= assignable;
+          if(hoursToAssign === 0) break; // wyczerpane max na dzień
+        }
+      }
+
+      // Jeśli po rozdaniu maxHours na dzień, ale minHours nie zostało osiągnięte (np. brak godzin maszyn),
+      // pozostawiamy ten dzień jako wolny (godziny = 0) — bo maszyny się skończyły.
+
+      currentDayIndex++;
+    }
+
+    // Po rozdaniu godzin, kolejne dni zostaną puste (0)
+
+    // Wyświetl tabelę harmonogramu
+    output.innerHTML = '';
+    const table = document.createElement('table');
+
+    // Nagłówek
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    headerRow.appendChild(document.createElement('th')).textContent = '📅 Data';
+    devices.forEach(dev => {
+      const th = document.createElement('th');
+      th.textContent = dev.name;
+      headerRow.appendChild(th);
+    });
+    headerRow.appendChild(document.createElement('th')).textContent = '🔢 Suma godzin';
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Ciało tabeli
+    const tbody = document.createElement('tbody');
+    days.forEach(d => {
+      const dateStr = d.toISOString().slice(0,10);
+      const tr = document.createElement('tr');
+      if(d.getDay() === 6) tr.classList.add('saturday');
+
+      const tdDate = document.createElement('td');
+      tdDate.textContent = dateStr;
+      tr.appendChild(tdDate);
+
+      let sumDay = 0;
+      devices.forEach(dev => {
+        const val = schedule[dateStr][dev.name];
+        sumDay += val;
+        const td = document.createElement('td');
+        td.textContent = val;
+        tr.appendChild(td);
+      });
+
+      // Jeśli suma godzin jest > 0 ale < minHours, oznacz na czerwono (wskazuje na niepełne min)
+      const sumTd = document.createElement('td');
+      sumTd.textContent = sumDay;
+      if(sumDay > 0 && sumDay < minHours) {
+        sumTd.style.backgroundColor = '#ffcdd2';
+      } else if (sumDay >= minHours && sumDay <= maxHours) {
+        sumTd.style.backgroundColor = '#c8e6c9';
+      }
+      tr.appendChild(sumTd);
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    // Podsumowanie sum godzin dla każdej maszyny i razem
+    const summaryRow = document.createElement('tr');
+    summaryRow.style.fontWeight = 'bold';
+    const tdLabel = document.createElement('td');
+    tdLabel.textContent = 'Suma godzin (razem)';
+    summaryRow.appendChild(tdLabel);
+
+    devices.forEach(dev => {
+      let sumHours = 0;
+      days.forEach(d => {
+        const dateStr = d.toISOString().slice(0,10);
+        sumHours += schedule[dateStr][dev.name];
+      });
+      const td = document.createElement('td');
+      td.textContent = sumHours;
+      summaryRow.appendChild(td);
+    });
+
+    let totalHours = 0;
+    devices.forEach(dev => {
+      days.forEach(d => {
+        const dateStr = d.toISOString().slice(0,10);
+        totalHours += schedule[dateStr][dev.name];
+      });
+    });
+    const totalTd = document.createElement('td');
+    totalTd.textContent = totalHours;
+    summaryRow.appendChild(totalTd);
+
+    tbody.appendChild(summaryRow);
+
+    output.appendChild(table);
+  });
+})();
+</script>
+
+</body>
+</html>
